@@ -1,0 +1,10 @@
+{
+    "chat.mcp.serverSampling": {
+        "GH_Copliot/.vscode/mcp.json: atlassian": {
+            "allowedModels": [
+                "copilot/auto",
+                "copilotcli/auto"
+            ]
+        }
+    }
+}
