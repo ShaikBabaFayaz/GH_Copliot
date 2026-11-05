@@ -1,4 +1,5 @@
 # Inventory Management System Architecture
+**Stage 2 status:** Approved by the user on 2026-11-03.
 ## Overview
 Proposed single-location web architecture: React/TypeScript UI calls a Spring Boot API; backend services coordinate product and stock operations over in-memory H2. Product, stock, history, alerts, and search map to US-01..05 (SCRUM-3/4/6/7/8).
 ## Project Technology Profile
@@ -6,25 +7,26 @@ Confirmed: full-stack web; Java/Spring Boot; React/TypeScript; in-memory H2; loc
 ## Components
 | Component | Responsibility | Interactions |
 |---|---|---|
-| React UI (proposed) | Responsive product list/details/forms, stock actions, movement history, low-stock view, combined search/filters | Calls API; renders validation, empty, and operation-error states |
-| Spring Boot API (confirmed framework; proposed boundary) | Product, stock, history, and search/low-stock operations; request validation and error mapping | UI -> services; exposes HTTP/JSON |
-| Application services (proposed) | Enforce unique SKU, positive movement quantity, nonnegative balance, and stock <= threshold rule | Coordinate repositories in one stock-change transaction |
-| H2 persistence (confirmed) | Runtime product and movement records | Repositories read/write data; data is lost on process restart |
+| React UI (proposed) | Login; responsive inventory/product/detail forms, stock actions/history, low-stock/search; deactivate products | Basic credentials in Authorization header only; INR formatting and WCAG 2.2 AA states |
+| Spring Boot API (confirmed framework; proposed boundary) | INVENTORY_MANAGER Basic-authenticated /api/v1 operations; validation and Problem Details | UI -> services over loopback HTTP or network HTTPS |
+| Application services (proposed) | Enforce SKU/stock invariants, optimistic locking, and deactivate without deleting history | Coordinate version check, balance update, and movement insert in one transaction |
+| H2 persistence (confirmed) | Product active/version fields and retained movement records | Repositories read/write data; all data is lost on process restart (accepted) |
 ## API, Data, and Flow
-Proposed resource surface: product list/detail/create/update/delete; stock IN/OUT operation; per-product movement history; product query by name/SKU, category, and stock status. Exact routes and payload fields remain implementation choices.
-Proposed records: Product (id, required product attributes, SKU, balance, threshold) and StockMovement (id, product ID, IN/OUT, positive quantity, reason/reference, timestamp). Money representation, actor, and timestamp/time-zone policy remain open.
-Flow: UI submits validated operation -> API/service checks business invariants -> database transaction updates balance and inserts movement -> response refreshes product status/history. A failure rolls back both writes; low stock is computed as balance <= threshold, including zero.
+Proposed `/api/v1` routes: `GET /auth/me`; `GET/POST /products`; `GET/PUT /products/{id}`; `PATCH /products/{id}/deactivation`; `POST /products/{id}/movements`; `GET /products/{id}/movements`; `GET /products/low-stock`; product query parameters `query`, `category`, `stockStatus`. Problem Details: 400 validation, 401 unauthenticated, 403 forbidden, 404 missing, 409 duplicate SKU/stale stock version.
+Product: required name (1-120 Unicode code points), SKU (1-64 trimmed ASCII matching `[A-Z0-9][A-Z0-9._/-]{0,63}` after uppercase), category, INR price/minimum threshold; optional description (<=2,000 code points), rejecting controls except newline/tab. Category is a seeded lookup extensible by data rows. Start stock at zero. Price `DECIMAL(14,2)`; countable integer stock `DECIMAL(12,0)` up to 999,999,999,999; reject invalid precision/range, never round. Movement: ID, product ID, IN/OUT, positive integer quantity, required reason/reference, authenticated username, server-generated UTC timestamp; display in user-local time. Deactivation is terminal and preserves ID/history; inactive products are omitted from normal lists and cannot receive stock. H2 restart loss is accepted.
+Flow: env-provisioned INVENTORY_MANAGER credentials authenticate every API request -> validate -> stock service compares expected/current version -> transaction updates balance/version and inserts movement -> UI refreshes. Stale versions return 409 without a movement; failures roll back both writes. Low stock is quantity <= threshold, including zero.
 ```mermaid
 flowchart LR
-  UI[React / TypeScript UI] -->|HTTP / JSON| API[Spring Boot API]
+  UI[React / TypeScript UI] -->|Basic auth + HTTP / JSON| API[Spring Boot API]
+  API --> AUTH[Basic authentication]
   API --> S[Application services]
   S -->|transaction| DB[(H2: products + movements)]
   DB --> S --> API --> UI
 ```
 ## Decisions and Quality
-Confirmed choices: stack, local deployment, single location, and H2. Proposed choices: UI/API/service/repository boundaries; product and movement records; transactional stock/history writes; computed low-stock status. No build, test, or runtime dependency is selected.
-Security/validation: validate inputs and invariants at the API/service boundary; enforce SKU uniqueness and nonnegative balance in persistence where supported; return actionable errors without exposing internals. Authentication/authorization and detailed field rules are unresolved; local deployment does not establish a security policy.
-Testing: automated tests are required; framework and build tool are open. Cover product validation/uniqueness, stock IN/OUT and rollback, chronological history, threshold boundaries, search/filter combinations, and errors. Verify UI responsive behavior when implementation exists.
-Risks/constraints: H2 is ephemeral across restarts; it cannot provide durable inventory history. Transaction atomicity is required, but concurrent update/locking strategy is not selected. No source/manifests constrain further compatibility decisions.
+Confirmed: Basic authentication, optimistic locking, soft deletion with history retention, INR unit pricing at two fractional digits with rejection (no rounding) above scale 2, and acceptance of in-memory H2 restart data loss. Proposed: credential handling in the UI, version field/expected-version contract, active flag, and UI/API/service/repository boundaries. No new dependency or tooling selected.
+Security/validation: all API routes require Basic auth and INVENTORY_MANAGER; credentials come from environment variables, with no defaults, persistence or logging. Use loopback-only HTTP locally and HTTPS if network-bound. Validate at UI/API/service boundaries; enforce normalized SKU uniqueness at DB and numeric constraints; return safe Problem Details.
+Integrity/testing: stale stockVersion must reject the operation without recording a movement; successful balance/version update and movement insert commit atomically. Deactivation preserves product IDs and all history; normal inventory/low-stock views exclude inactive products while history remains addressable. Test conflicts, rollback, retained history, and soft deletion.
+Risks/constraints: H2 restart loss is accepted and documented; it precludes durable inventory history. Inactive product reactivation is not supported; stock operations on inactive products are rejected. No source/manifests constrain further compatibility decisions.
 ## Open Decisions
-Deletion when movements exist; currency/price precision; authentication and authorization; detailed required-field, SKU normalization, category, and initial-stock rules; concurrency strategy; movement reason/actor/timestamp/time-zone policy; measurable quality, accessibility, and UI targets; build/package and test tools.
+Reproducible p95 benchmark environment/request mix and exact dependency/tool approval. Category, field and integer-stock recommendations are user-approved. No dependencies are installed.
