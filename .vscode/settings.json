@@ -6,5 +6,6 @@
                 "copilotcli/auto"
             ]
         }
-    }
+    },
+    "java.configuration.updateBuildConfiguration": "interactive"
 }
